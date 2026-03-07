@@ -1,73 +1,42 @@
 {% extends "base.html" %}
-
+{% block title %}Product cost trends – PayCheck Analyzer{% endblock %}
 {% block content %}
-<section class="form-page">
-  <h1>Product cost changes</h1>
-
-  <p class="hint">
-    Select a product to see how its price per item has changed over time.
-  </p>
-
-  <form method="get" class="card form-card compact">
-    <div class="form-row inline">
-      <label for="product">Product</label>
-      <select id="product" name="product">
-        <option value="">Select product</option>
-        {% for p in products %}
-        <option
-          value="{{ p.product }}"
-          {% if selected_product == p.product %}selected{% endif %}
-        >
-          {{ p.product }}
-        </option>
+<h1>Product cost trends</h1>
+{% if empty %}
+<div class="card empty-state">
+  <p>No data for trends. Add paychecks to see product cost changes over time.</p>
+  <p><a href="{{ url_for('add_paycheck') }}">Add paycheck</a></p>
+</div>
+{% else %}
+<div class="card">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Product</th>
+          <th>Category</th>
+          <th>Period (month)</th>
+          <th>Avg price ({{ currency }})</th>
+          <th>Min</th>
+          <th>Max</th>
+          <th>Total qty</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in trends %}
+        <tr>
+          <td>{{ row.product_name }}</td>
+          <td>{{ row.category_name }}</td>
+          <td>{{ row.period }}</td>
+          <td>{{ "%.2f"|format(row.avg_price) }}</td>
+          <td>{{ "%.2f"|format(row.min_price) }}</td>
+          <td>{{ "%.2f"|format(row.max_price) }}</td>
+          <td>{{ row.total_quantity }}</td>
+        </tr>
         {% endfor %}
-      </select>
-      <button type="submit" class="primary">Show trend</button>
-    </div>
-  </form>
-
-  {% if selected_product %}
-  <div class="card">
-    {% if trend_points|length == 0 %}
-    <p>No data for this product yet.</p>
-    {% else %}
-    <h2>{{ selected_product }} &mdash; price per item</h2>
-    <canvas id="trendChart"></canvas>
-    {% endif %}
+      </tbody>
+    </table>
   </div>
-  {% endif %}
-
-  {% if selected_product and trend_points|length %}
-  <script>
-    const trendLabels = {{ trend_points|map(attribute='date')|list|tojson }};
-    const trendValues = {{ trend_points|map(attribute='unit_price')|list|tojson }};
-    const currency = "{{ selected_currency }}";
-
-    new Chart(document.getElementById("trendChart"), {
-      type: "line",
-      data: {
-        labels: trendLabels,
-        datasets: [
-          {
-            label: "Price (" + currency + ")",
-            data: trendValues,
-            borderColor: "#0ea5e9",
-            backgroundColor: "rgba(14,165,233,0.2)",
-            tension: 0.3,
-          },
-        ],
-      },
-      options: {
-        responsive: true,
-        scales: {
-          y: {
-            beginAtZero: false,
-          },
-        },
-      },
-    });
-  </script>
-  {% endif %}
-</section>
+</div>
+{% endif %}
 {% endblock %}
-

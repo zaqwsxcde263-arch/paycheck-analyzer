@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit product' if product else 'Add product' }} – PayCheck Analyzer{% endblock %}
+{% block content %}
+<h1>{{ 'Edit product' if product else 'Add product' }}</h1>
+{% if error %}<p class="error">{{ error }}</p>{% endif %}
+<form method="post" action="{{ url_for('product_edit', product_id=product.id) if product else url_for('product_add') }}">
+  <div class="form-group">
+    <label for="name">Name</label>
+    <input type="text" id="name" name="name" value="{{ name or (product.name if product else '') }}" required>
+  </div>
+  <div class="form-group">
+    <label for="category_id">Category</label>
+    <select id="category_id" name="category_id" required>
+      <option value="">Select category</option>
+      {% for c in categories %}
+      <option value="{{ c.id }}" {% if (category_id or (product.category_id if product else 0)) == c.id %}selected{% endif %}>{{ c.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <button type="submit" class="btn btn-primary">Save</button>
+  <a href="{{ url_for('products_list') }}" class="btn btn-secondary">Cancel</a>
+</form>
+{% endblock %}

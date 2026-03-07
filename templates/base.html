@@ -1,65 +1,27 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Paycheck Analyzer</title>
-    <link
-      rel="stylesheet"
-      href="{{ url_for('static', filename='styles.css') }}"
-    />
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  </head>
-  <body>
-    <header class="top-nav">
-      <div class="nav-left">
-        <span class="app-title">Paycheck Analyzer</span>
-        <nav>
-          <a href="{{ url_for('dashboard') }}">Dashboard</a>
-          <a href="{{ url_for('add_expenses') }}">Add expenses</a>
-          <a href="{{ url_for('manage_categories') }}">Categories</a>
-          <a href="{{ url_for('product_trends') }}">Product cost changes</a>
-        </nav>
-      </div>
-      <div class="nav-right">
-        <form
-          method="post"
-          action="{{ url_for('set_currency') }}"
-          class="currency-form"
-        >
-          <label for="currency">Currency:</label>
-          <select
-            name="currency"
-            id="currency"
-            onchange="this.form.submit()"
-          >
-            {% for cur in currencies %}
-            <option
-              value="{{ cur }}"
-              {% if cur == selected_currency %}selected{% endif %}
-            >
-              {{ cur }}
-            </option>
-            {% endfor %}
-          </select>
-        </form>
-      </div>
-    </header>
-
-    <main class="page-content">
-      {% with messages = get_flashed_messages(with_categories=true) %} {% if
-      messages %}
-      <div class="flash-container">
-        {% for category, message in messages %}
-        <div class="flash flash-{{ category }}">{{ message }}</div>
-        {% endfor %}
-      </div>
-      {% endif %} {% endwith %}
-
-      {% block content %}{% endblock %}
-    </main>
-
-    <script src="{{ url_for('static', filename='app.js') }}"></script>
-  </body>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}PayCheck Analyzer{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+  <header class="header">
+    <nav class="nav">
+      <a href="{{ url_for('dashboard') }}">Dashboard</a>
+      <a href="{{ url_for('add_paycheck') }}">Add Paycheck</a>
+      <a href="{{ url_for('categories_list') }}">Categories</a>
+      <a href="{{ url_for('products_list') }}">Products</a>
+      <a href="{{ url_for('product_trends') }}">Product Trends</a>
+      <a href="{{ url_for('settings') }}">Settings</a>
+    </nav>
+    <span class="currency-badge">Currency: {{ currency or 'USD' }}</span>
+  </header>
+  <main class="main">
+    {% block content %}{% endblock %}
+  </main>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+  {% block scripts %}{% endblock %}
+</body>
 </html>
-

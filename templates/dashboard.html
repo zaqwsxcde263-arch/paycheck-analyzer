@@ -1,133 +1,59 @@
 {% extends "base.html" %}
-
+{% block title %}Dashboard – PayCheck Analyzer{% endblock %}
 {% block content %}
-<section class="dashboard">
-  <h1>Overview</h1>
-
-  <div class="summary-cards">
-    <div class="card">
-      <div class="card-label">Total spent</div>
-      <div class="card-value">{{ format_money(total_spent) }}</div>
-    </div>
-    <div class="card">
-      <div class="card-label">Last transaction date</div>
-      <div class="card-value">
-        {% if last_date %} {{ last_date }} {% else %}No data yet{% endif %}
-      </div>
-    </div>
-  </div>
-
-  <div class="chart-grid">
-    <div class="chart-card">
-      <h2>By month</h2>
-      <canvas id="monthlyChart"></canvas>
-    </div>
-    <div class="chart-card">
-      <h2>By week</h2>
-      <canvas id="weeklyChart"></canvas>
-    </div>
-    <div class="chart-card full-width">
-      <h2>By category (overall)</h2>
-      <canvas id="categoryChart"></canvas>
+<h1>Dashboard</h1>
+{% if empty %}
+<div class="card empty-state">
+  <p>No paychecks yet. Add your first costs to see statistics.</p>
+  <p><a href="{{ url_for('add_paycheck') }}">Add paycheck</a></p>
+</div>
+{% else %}
+<div class="dashboard-grid">
+  <div class="card">
+    <h2>By month</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Month</th><th>Total ({{ currency }})</th></tr>
+        </thead>
+        <tbody>
+          {% for row in by_month %}
+          <tr><td>{{ row.period }}</td><td>{{ "%.2f"|format(row.total) }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
     </div>
   </div>
-</section>
-
-<script>
-  const monthlyLabels = {{ monthly|map(attribute='period')|list|tojson }};
-  const monthlyValues = {{ monthly|map(attribute='total')|list|tojson }};
-
-  const weeklyLabels = {{ weekly|map(attribute='period')|list|tojson }};
-  const weeklyValues = {{ weekly|map(attribute='total')|list|tojson }};
-
-  const categoryLabels = {{ by_category|map(attribute='category')|list|tojson }};
-  const categoryValues = {{ by_category|map(attribute='total')|list|tojson }};
-
-  const currency = "{{ selected_currency }}";
-
-  function convertValues(values) {
-    // Server already converts when rendering numbers via format_money,
-    // but charts receive raw base-currency values. We apply the same
-    // conversion client-side using a rate derived from a sample.
-    // To keep JS simple, we just scale by a factor sent from server later
-    // if needed. For now, we assume 1:1 and show base currency indicator.
-    return values;
-  }
-
-  if (monthlyLabels.length) {
-    new Chart(document.getElementById("monthlyChart"), {
-      type: "bar",
-      data: {
-        labels: monthlyLabels,
-        datasets: [
-          {
-            label: "Total (" + currency + ")",
-            data: convertValues(monthlyValues),
-            backgroundColor: "#4f46e5",
-          },
-        ],
-      },
-      options: {
-        responsive: true,
-        scales: {
-          y: {
-            beginAtZero: true,
-          },
-        },
-      },
-    });
-  }
-
-  if (weeklyLabels.length) {
-    new Chart(document.getElementById("weeklyChart"), {
-      type: "line",
-      data: {
-        labels: weeklyLabels,
-        datasets: [
-          {
-            label: "Total (" + currency + ")",
-            data: convertValues(weeklyValues),
-            borderColor: "#22c55e",
-            backgroundColor: "rgba(34,197,94,0.2)",
-            tension: 0.3,
-          },
-        ],
-      },
-      options: {
-        responsive: true,
-        scales: {
-          y: {
-            beginAtZero: true,
-          },
-        },
-      },
-    });
-  }
-
-  if (categoryLabels.length) {
-    new Chart(document.getElementById("categoryChart"), {
-      type: "bar",
-      data: {
-        labels: categoryLabels,
-        datasets: [
-          {
-            label: "Total (" + currency + ")",
-            data: convertValues(categoryValues),
-            backgroundColor: "#ec4899",
-          },
-        ],
-      },
-      options: {
-        indexAxis: "y",
-        responsive: true,
-        scales: {
-          x: {
-            beginAtZero: true,
-          },
-        },
-      },
-    });
-  }
-</script>
+  <div class="card">
+    <h2>By category</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Category</th><th>Total ({{ currency }})</th></tr>
+        </thead>
+        <tbody>
+          {% for row in by_category %}
+          <tr><td>{{ row.category_name }}</td><td>{{ "%.2f"|format(row.total) }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="card">
+    <h2>By week</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Week (Y-W)</th><th>Total ({{ currency }})</th></tr>
+        </thead>
+        <tbody>
+          {% for row in by_week %}
+          <tr><td>{{ row.period }}</td><td>{{ "%.2f"|format(row.total) }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}
 {% endblock %}
-

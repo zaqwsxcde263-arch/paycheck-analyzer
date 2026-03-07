@@ -1,45 +1,14 @@
 {% extends "base.html" %}
-
+{% block title %}{{ 'Edit category' if category else 'Add category' }} – PayCheck Analyzer{% endblock %}
 {% block content %}
-<section class="form-page">
-  <h1>Edit category</h1>
-
-  {% if errors and errors|length %}
-  <div class="error-list">
-    <ul>
-      {% for err in errors %}
-      <li>{{ err }}</li>
-      {% endfor %}
-    </ul>
+<h1>{{ 'Edit category' if category else 'Add category' }}</h1>
+{% if error %}<p class="error">{{ error }}</p>{% endif %}
+<form method="post" action="{{ url_for('category_edit', category_id=category.id) if category else url_for('category_add') }}">
+  <div class="form-group">
+    <label for="name">Name</label>
+    <input type="text" id="name" name="name" value="{{ name or (category.name if category else '') }}" required>
   </div>
-  {% endif %}
-
-  <div class="card form-card">
-    <form method="post">
-      <div class="form-row">
-        <label for="name">Name</label>
-        <input
-          type="text"
-          id="name"
-          name="name"
-          value="{{ category.name }}"
-          required
-        />
-      </div>
-      <div class="form-row">
-        <label for="description">Description (optional)</label>
-        <textarea id="description" name="description" rows="2">
-{{ category.description or "" }}</textarea
-        >
-      </div>
-      <div class="form-actions">
-        <a href="{{ url_for('manage_categories') }}" class="secondary button-link">
-          Cancel
-        </a>
-        <button type="submit" class="primary">Save changes</button>
-      </div>
-    </form>
-  </div>
-</section>
+  <button type="submit" class="btn btn-primary">Save</button>
+  <a href="{{ url_for('categories_list') }}" class="btn btn-secondary">Cancel</a>
+</form>
 {% endblock %}
-

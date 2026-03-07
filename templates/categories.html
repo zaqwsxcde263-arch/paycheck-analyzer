@@ -1,87 +1,35 @@
 {% extends "base.html" %}
-
+{% block title %}Categories – PayCheck Analyzer{% endblock %}
 {% block content %}
-<section class="form-page">
-  <h1>Categories</h1>
-
-  <p class="hint">
-    Define categories such as Groceries, Rent, Utilities, Entertainment, etc.
-  </p>
-
-  {% if errors and errors|length %}
-  <div class="error-list">
-    <ul>
-      {% for err in errors %}
-      <li>{{ err }}</li>
-      {% endfor %}
-    </ul>
-  </div>
-  {% endif %}
-
-  <div class="card">
-    <h2>Existing categories</h2>
-    {% if categories|length == 0 %}
-    <p>No categories yet. Use the form below to create one.</p>
-    {% else %}
-    <table class="simple-table">
+<h1>Categories</h1>
+<p><a href="{{ url_for('category_add') }}" class="btn btn-primary">Add category</a></p>
+{% if not categories %}
+<div class="card empty-state">
+  <p>No categories yet. Create one to use in paychecks.</p>
+  <p><a href="{{ url_for('category_add') }}">Add category</a></p>
+</div>
+{% else %}
+<div class="card">
+  <div class="table-wrap">
+    <table>
       <thead>
-        <tr>
-          <th>Name</th>
-          <th>Description</th>
-          <th></th>
-        </tr>
+        <tr><th>Name</th><th></th></tr>
       </thead>
       <tbody>
-        {% for cat in categories %}
+        {% for c in categories %}
         <tr>
-          <td>{{ cat.name }}</td>
-          <td>{{ cat.description or "" }}</td>
-          <td class="actions">
-            <a href="{{ url_for('edit_category', category_id=cat.id) }}">
-              Edit
-            </a>
-            <form
-              method="post"
-              action="{{ url_for('delete_category', category_id=cat.id) }}"
-              onsubmit="return confirm('Delete this category?');"
-            >
-              <button type="submit" class="link-button danger">Delete</button>
+          <td>{{ c.name }}</td>
+          <td>
+            <a href="{{ url_for('category_edit', category_id=c.id) }}" class="btn btn-secondary">Edit</a>
+            <form method="post" action="{{ url_for('category_delete', category_id=c.id) }}" style="display:inline;">
+              <button type="submit" class="btn btn-danger" onclick="return confirm('Delete this category?');">Delete</button>
             </form>
           </td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
-    {% endif %}
   </div>
-
-  <div class="card form-card">
-    <h2>Create new category</h2>
-    <form method="post">
-      <div class="form-row">
-        <label for="name">Name</label>
-        <input
-          type="text"
-          id="name"
-          name="name"
-          placeholder="e.g. Groceries"
-          required
-        />
-      </div>
-      <div class="form-row">
-        <label for="description">Description (optional)</label>
-        <textarea
-          id="description"
-          name="description"
-          rows="2"
-          placeholder="Any notes about this category"
-        ></textarea>
-      </div>
-      <div class="form-actions">
-        <button type="submit" class="primary">Add category</button>
-      </div>
-    </form>
-  </div>
-</section>
+</div>
+{% endif %}
 {% endblock %}
-

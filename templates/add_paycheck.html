@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Add Paycheck – PayCheck Analyzer{% endblock %}
+{% block content %}
+<h1>Add Paycheck</h1>
+{% if no_categories %}
+<div class="card empty-state">
+  <p>Please add at least one category before adding costs.</p>
+  <p><a href="{{ url_for('categories_list') }}">Manage categories</a></p>
+</div>
+{% elif not products_by_category or products_by_category|length == 0 %}
+<div class="card empty-state">
+  <p>No products yet. Add products to use in paychecks.</p>
+  <p><a href="{{ url_for('products_list') }}">Manage products</a></p>
+</div>
+{% else %}
+<script id="categories-data" type="application/json">{{ categories | tojson }}</script>
+<script id="products-by-category" type="application/json">{{ products_by_category | tojson }}</script>
+<form method="post" action="{{ url_for('add_paycheck') }}">
+  <div id="paycheck-items" class="paycheck-items" data-initial-rows="{{ '1' if not items or items|length == 0 else '0' }}">
+    {% for item in items %}
+    <div class="item-row">
+      <div class="form-group">
+        <label>Date</label>
+        <input type="date" name="items_{{ loop.index0 }}_date" value="{{ item.get('date', '') }}" required>
+        {% if item_errors[loop.index0].get('date') %}<span class="error">{{ item_errors[loop.index0].date }}</span>{% endif %}
+      </div>
+      <div class="form-group">
+        <label>Category</label>
+        <select name="items_{{ loop.index0 }}_category_id" required class="item-category">
+          <option value="">Select category</option>
+          {% for c in categories %}
+          <option value="{{ c.id }}" {% if item.get('category_id') == c.id or (item.get('category_id')|string) == (c.id|string) %}selected{% endif %}>{{ c.name }}</option>
+          {% endfor %}
+        </select>
+        {% if item_errors[loop.index0].get('category') %}<span class="error">{{ item_errors[loop.index0].category }}</span>{% endif %}
+      </div>
+      <div class="form-group product-filter-wrap">
+        <label>Product</label>
+        <input type="text" class="product-filter" placeholder="Filter products..." autocomplete="off">
+        <select name="items_{{ loop.index0 }}_product_id" required class="item-product">
+          <option value="">Select product</option>
+          {% for cid, prods in products_by_category.items() %}
+            {% for p in prods %}
+            <option value="{{ p.id }}" {% if item.get('product_id') == p.id or (item.get('product_id')|string) == (p.id|string) %}selected{% endif %} data-category="{{ cid }}">{{ p.name }}</option>
+            {% endfor %}
+          {% endfor %}
+        </select>
+        {% if item_errors[loop.index0].get('product') %}<span class="error">{{ item_errors[loop.index0].product }}</span>{% endif %}
+      </div>
+      <div class="form-group">
+        <label>Price</label>
+        <input type="number" name="items_{{ loop.index0 }}_price" step="any" min="0" value="{{ item.get('price', '') }}" required placeholder="0">
+        {% if item_errors[loop.index0].get('price') %}<span class="error">{{ item_errors[loop.index0].price }}</span>{% endif %}
+      </div>
+      <div class="form-group">
+        <label>Qty</label>
+        <input type="number" name="items_{{ loop.index0 }}_quantity" min="1" value="{{ item.get('quantity', 1) }}" required>
+        {% if item_errors[loop.index0].get('quantity') %}<span class="error">{{ item_errors[loop.index0].quantity }}</span>{% endif %}
+      </div>
+      <button type="button" class="btn btn-secondary remove-row" aria-label="Remove row">×</button>
+    </div>
+    {% endfor %}
+  </div>
+  <button type="button" id="add-item" class="btn btn-primary">Add item</button>
+  <button type="submit" class="btn btn-primary">Save paycheck</button>
+</form>
+{% endif %}
+{% endblock %}

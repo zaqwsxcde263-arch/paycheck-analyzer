@@ -1,438 +1,339 @@
+"""PayCheck Analyzer - Flask application."""
 import os
-import sqlite3
-from datetime import datetime
+from flask import Flask, g, redirect, render_template, request, url_for
 
-from flask import (
-    Flask,
-    render_template,
-    request,
-    redirect,
-    url_for,
-    flash,
-    session,
-)
+import db
+from config import AVAILABLE_CURRENCIES, DEFAULT_CURRENCY
+from validation import validate_cost_item
+
+app = Flask(__name__)
+app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret-change-in-production")
 
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(BASE_DIR, "paycheck.db")
-
-ALLOWED_CURRENCIES = ["USD", "RUB", "BYN", "EUR", "JPY"]
-
-# Simple example rates: how much of each currency you get for 1 USD.
-# Adjust these manually if you want more accurate or current values.
-CURRENCY_RATES = {
-    "USD": 1.0,
-    "EUR": 0.92,
-    "RUB": 90.0,
-    "BYN": 3.2,
-    "JPY": 150.0,
-}
+@app.before_request
+def before_request():
+    db.init_db()
+    g.currency = db.get_setting("currency") or DEFAULT_CURRENCY
 
 
-def create_app() -> Flask:
-    app = Flask(__name__)
-    # In production, override this with an environment variable
-    app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-change-me")
-    app.config["DATABASE"] = DB_PATH
+@app.context_processor
+def inject_currency():
+    return {"currency": g.get("currency", DEFAULT_CURRENCY)}
 
-    ensure_database(app)
 
-    @app.context_processor
-    def inject_currency_helpers():
-        selected = get_selected_currency()
-        return {
-            "currencies": ALLOWED_CURRENCIES,
-            "selected_currency": selected,
-            "format_money": lambda amount: format_money(amount, selected),
-        }
-
-    @app.route("/")
-    def index():
-        return redirect(url_for("dashboard"))
-
-    @app.route("/set-currency", methods=["POST"])
-    def set_currency():
-        currency = request.form.get("currency")
-        if currency in ALLOWED_CURRENCIES:
-            session["currency"] = currency
-        else:
-            flash("Unsupported currency selected.", "error")
-        return redirect(request.referrer or url_for("dashboard"))
-
-    @app.route("/expenses/new", methods=["GET", "POST"])
-    def add_expenses():
-        conn = get_db(app)
-        categories = conn.execute(
-            "SELECT id, name FROM categories ORDER BY name"
-        ).fetchall()
-
-        if not categories:
-            flash("Please create at least one category before adding expenses.", "error")
-            return redirect(url_for("manage_categories"))
-
-        errors = []
-        form_items = []
-        date_value = datetime.today().strftime("%Y-%m-%d")
-
-        if request.method == "POST":
-            date_str = request.form.get("date", "").strip()
-            products = request.form.getlist("product[]")
-            category_ids = request.form.getlist("category_id[]")
-            quantities = request.form.getlist("quantity[]")
-            prices = request.form.getlist("price[]")
-
-            # Validate date
-            try:
-                datetime.strptime(date_str, "%Y-%m-%d")
-            except ValueError:
-                errors.append("Date must be in format YYYY-MM-DD.")
-
-            date_value = date_str
-
-            valid_items = []
-
-            for idx, (product, cat_id, qty, price) in enumerate(
-                zip(products, category_ids, quantities, prices), start=1
-            ):
-                product = (product or "").strip()
-                cat_id = (cat_id or "").strip()
-                qty = (qty or "").strip()
-                price = (price or "").strip()
-
-                # Preserve form data
-                form_items.append(
-                    {
-                        "product": product,
-                        "category_id": cat_id,
-                        "quantity": qty,
-                        "price": price,
-                    }
-                )
-
-                # Skip completely empty rows
-                if not any([product, cat_id, qty, price]):
-                    continue
-
-                row_prefix = f"Row {idx}: "
-
-                if not product:
-                    errors.append(row_prefix + "Product name is required.")
-
-                try:
-                    cat_id_int = int(cat_id)
-                except (TypeError, ValueError):
-                    errors.append(row_prefix + "Category is required.")
-                    cat_id_int = None
-
-                try:
-                    qty_int = int(qty)
-                    if qty_int <= 0:
-                        raise ValueError
-                except (TypeError, ValueError):
-                    errors.append(row_prefix + "Quantity must be a positive integer.")
-                    qty_int = None
-
-                try:
-                    price_float = float(price)
-                    if price_float <= 0:
-                        raise ValueError
-                except (TypeError, ValueError):
-                    errors.append(row_prefix + "Price must be a positive number.")
-                    price_float = None
-
-                if (
-                    product
-                    and cat_id_int is not None
-                    and qty_int is not None
-                    and price_float is not None
-                ):
-                    valid_items.append(
-                        {
-                            "product": product,
-                            "category_id": cat_id_int,
-                            "quantity": qty_int,
-                            "price": price_float,
-                        }
-                    )
-
-            if not valid_items and not errors:
-                errors.append("Please fill at least one item row.")
-
-            if not errors and valid_items:
-                with conn:
-                    conn.executemany(
-                        """
-                        INSERT INTO expenses (date, product, category_id, quantity, unit_price)
-                        VALUES (?, ?, ?, ?, ?)
-                        """,
-                        [
-                            (
-                                date_value,
-                                item["product"],
-                                item["category_id"],
-                                item["quantity"],
-                                item["price"],
-                            )
-                            for item in valid_items
-                        ],
-                    )
-
-                flash(f"Successfully added {len(valid_items)} expense item(s).", "success")
-                return redirect(url_for("dashboard"))
-
-        # Initial render or re-render with errors
-        if not form_items:
-            # Provide a few empty rows by default
-            form_items = [
-                {"product": "", "category_id": "", "quantity": "", "price": ""}
-                for _ in range(3)
-            ]
-
-        return render_template(
-            "add_expenses.html",
-            categories=categories,
-            errors=errors,
-            items=form_items,
-            date_value=date_value,
-        )
-
-    @app.route("/categories", methods=["GET", "POST"])
-    def manage_categories():
-        conn = get_db(app)
-        errors = []
-
-        if request.method == "POST":
-            name = (request.form.get("name") or "").strip()
-            description = (request.form.get("description") or "").strip()
-
-            if not name:
-                errors.append("Category name is required.")
-            else:
-                try:
-                    with conn:
-                        conn.execute(
-                            "INSERT INTO categories (name, description) VALUES (?, ?)",
-                            (name, description or None),
-                        )
-                    flash(f"Category '{name}' created.", "success")
-                    return redirect(url_for("manage_categories"))
-                except sqlite3.IntegrityError:
-                    errors.append("Category with this name already exists.")
-
-        categories = conn.execute(
-            "SELECT id, name, description FROM categories ORDER BY name"
-        ).fetchall()
-
-        return render_template(
-            "categories.html",
-            categories=categories,
-            errors=errors,
-        )
-
-    @app.route("/categories/<int:category_id>/edit", methods=["GET", "POST"])
-    def edit_category(category_id: int):
-        conn = get_db(app)
-        category = conn.execute(
-            "SELECT id, name, description FROM categories WHERE id = ?", (category_id,)
-        ).fetchone()
-        if category is None:
-            flash("Category not found.", "error")
-            return redirect(url_for("manage_categories"))
-
-        errors = []
-
-        if request.method == "POST":
-            name = (request.form.get("name") or "").strip()
-            description = (request.form.get("description") or "").strip()
-
-            if not name:
-                errors.append("Category name is required.")
-            else:
-                try:
-                    with conn:
-                        conn.execute(
-                            """
-                            UPDATE categories
-                            SET name = ?, description = ?
-                            WHERE id = ?
-                            """,
-                            (name, description or None, category_id),
-                        )
-                    flash("Category updated.", "success")
-                    return redirect(url_for("manage_categories"))
-                except sqlite3.IntegrityError:
-                    errors.append("Category with this name already exists.")
-
-        return render_template(
-            "category_edit.html",
-            category=category,
-            errors=errors,
-        )
-
-    @app.route("/categories/<int:category_id>/delete", methods=["POST"])
-    def delete_category(category_id: int):
-        conn = get_db(app)
-
-        usage = conn.execute(
-            "SELECT COUNT(*) AS cnt FROM expenses WHERE category_id = ?", (category_id,)
-        ).fetchone()
-
-        if usage["cnt"] > 0:
-            flash("Cannot delete category that is used by expenses.", "error")
-        else:
-            with conn:
-                conn.execute("DELETE FROM categories WHERE id = ?", (category_id,))
-            flash("Category deleted.", "success")
-
-        return redirect(url_for("manage_categories"))
-
-    @app.route("/dashboard")
-    def dashboard():
-        conn = get_db(app)
-
-        monthly = conn.execute(
-            """
-            SELECT strftime('%Y-%m', date) AS period,
-                   SUM(quantity * unit_price) AS total
-            FROM expenses
-            GROUP BY period
-            ORDER BY period
-            """
-        ).fetchall()
-
-        weekly = conn.execute(
-            """
-            SELECT strftime('%Y-%W', date) AS period,
-                   SUM(quantity * unit_price) AS total
-            FROM expenses
-            GROUP BY period
-            ORDER BY period
-            """
-        ).fetchall()
-
-        by_category = conn.execute(
-            """
-            SELECT c.name AS category,
-                   SUM(e.quantity * e.unit_price) AS total
-            FROM expenses e
-            JOIN categories c ON e.category_id = c.id
-            GROUP BY c.id, c.name
-            ORDER BY total DESC
-            """
-        ).fetchall()
-
-        total_spent_row = conn.execute(
-            "SELECT SUM(quantity * unit_price) AS total FROM expenses"
-        ).fetchone()
-        total_spent = total_spent_row["total"] or 0.0
-
-        latest_date_row = conn.execute(
-            "SELECT MAX(date) AS last_date FROM expenses"
-        ).fetchone()
-        last_date = latest_date_row["last_date"]
-
+@app.route("/")
+def dashboard():
+    count = db.count_costs()
+    if count == 0:
         return render_template(
             "dashboard.html",
-            monthly=monthly,
-            weekly=weekly,
-            by_category=by_category,
-            total_spent=total_spent,
-            last_date=last_date,
+            empty=True,
+            by_month=[],
+            by_category=[],
+            by_week=[],
         )
+    return render_template(
+        "dashboard.html",
+        empty=False,
+        by_month=db.stats_by_month(),
+        by_category=db.stats_by_category(),
+        by_week=db.stats_by_week(),
+    )
 
-    @app.route("/products/trends")
-    def product_trends():
-        conn = get_db(app)
 
-        products = conn.execute(
-            "SELECT DISTINCT product FROM expenses ORDER BY product"
-        ).fetchall()
+@app.route("/paycheck/add", methods=["GET", "POST"])
+def add_paycheck():
+    categories = db.list_categories()
+    products = db.list_products()
+    products_by_category = {}
+    for p in products:
+        cid = p["category_id"]
+        if cid not in products_by_category:
+            products_by_category[cid] = []
+        products_by_category[cid].append({"id": p["id"], "name": p["name"]})
 
-        product_name = request.args.get("product") or None
-        trend_points = []
-
-        if product_name:
-            trend_points = conn.execute(
-                """
-                SELECT date, unit_price
-                FROM expenses
-                WHERE product = ?
-                ORDER BY date
-                """,
-                (product_name,),
-            ).fetchall()
-
+    if not categories:
         return render_template(
-            "product_trends.html",
-            products=products,
-            selected_product=product_name,
-            trend_points=trend_points,
+            "add_paycheck.html",
+            categories=[],
+            products_by_category={},
+            items=[],
+            item_errors=[],
+            no_categories=True,
         )
 
-    return app
-
-
-def get_db(app: Flask) -> sqlite3.Connection:
-    conn = getattr(app, "_database", None)
-    if conn is None:
-        conn = sqlite3.connect(app.config["DATABASE"])
-        conn.row_factory = sqlite3.Row
-        app._database = conn
-    return conn
-
-
-def ensure_database(app: Flask) -> None:
-    os.makedirs(os.path.dirname(app.config["DATABASE"]), exist_ok=True) if os.path.dirname(
-        app.config["DATABASE"]
-    ) else None
-    conn = sqlite3.connect(app.config["DATABASE"])
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS categories (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL UNIQUE,
-            description TEXT
+    if request.method == "GET":
+        return render_template(
+            "add_paycheck.html",
+            categories=categories,
+            products_by_category=products_by_category,
+            items=[{}],
+            item_errors=[],
+            no_categories=False,
         )
-        """
+
+    # POST: parse form items (items[0][date], items[0][price], ... or items_0_date, ...)
+    raw = request.form
+    items = []
+    idx = 0
+    while True:
+        date_key = f"items_{idx}_date"
+        if date_key not in raw and f"items[{idx}][date]" not in raw:
+            break
+        date = raw.get(f"items_{idx}_date") or raw.get(f"items[{idx}][date]")
+        price = raw.get(f"items_{idx}_price") or raw.get(f"items[{idx}][price]")
+        product_id = raw.get(f"items_{idx}_product_id") or raw.get(f"items[{idx}][product_id]")
+        category_id = raw.get(f"items_{idx}_category_id") or raw.get(f"items[{idx}][category_id]")
+        quantity = raw.get(f"items_{idx}_quantity") or raw.get(f"items[{idx}][quantity]")
+        items.append({
+            "date": date,
+            "price": price,
+            "product_id": product_id,
+            "category_id": category_id,
+            "quantity": quantity,
+        })
+        idx += 1
+
+    if not items:
+        return render_template(
+            "add_paycheck.html",
+            categories=categories,
+            products_by_category=products_by_category,
+            items=[{}],
+            item_errors=[{"_": "Add at least one item."}],
+            no_categories=False,
+        ), 400
+
+    category_ids = db.get_category_ids_set()
+    product_ids = db.get_product_ids_set()
+    product_to_category = db.get_product_to_category()
+    item_errors = []
+    all_valid = True
+    for i, item in enumerate(items):
+        ok, errs = validate_cost_item(
+            {
+                "date": item["date"],
+                "price": item["price"],
+                "product_id": item["product_id"],
+                "category_id": item["category_id"],
+                "quantity": item["quantity"],
+            },
+            category_ids=category_ids,
+            product_ids=product_ids,
+            product_to_category=product_to_category,
+        )
+        if not ok:
+            all_valid = False
+            item_errors.append(errs)
+        else:
+            item_errors.append({})
+
+    if not all_valid:
+        return (
+            render_template(
+                "add_paycheck.html",
+                categories=categories,
+                products_by_category=products_by_category,
+                items=items,
+                item_errors=item_errors,
+                no_categories=False,
+            ),
+            400,
+        )
+
+    to_insert = []
+    for item in items:
+        to_insert.append({
+            "date": item["date"].strip()[:10],
+            "price": float(item["price"]),
+            "product_id": int(item["product_id"]),
+            "category_id": int(item["category_id"]),
+            "quantity": int(item["quantity"]),
+        })
+    db.insert_costs(to_insert)
+    return redirect(url_for("dashboard"))
+
+
+@app.route("/categories")
+def categories_list():
+    categories = db.list_categories()
+    return render_template("categories.html", categories=categories)
+
+
+@app.route("/categories/add", methods=["GET", "POST"])
+def category_add():
+    if request.method == "GET":
+        return render_template("category_edit.html", category=None)
+    name = (request.form.get("name") or "").strip()
+    if not name:
+        return (
+            render_template("category_edit.html", category=None, name=name, error="Name is required."),
+            400,
+        )
+    try:
+        db.create_category(name)
+        return redirect(url_for("categories_list"))
+    except Exception:
+        return (
+            render_template(
+                "category_edit.html",
+                category=None,
+                name=name,
+                error="Category with this name already exists.",
+            ),
+            400,
+        )
+
+
+@app.route("/categories/<int:category_id>/edit", methods=["GET", "POST"])
+def category_edit(category_id):
+    category = db.get_category(category_id)
+    if not category:
+        return "Category not found", 404
+    if request.method == "GET":
+        return render_template("category_edit.html", category=category)
+    name = (request.form.get("name") or "").strip()
+    if not name:
+        return (
+            render_template(
+                "category_edit.html",
+                category=category,
+                name=name,
+                error="Name is required.",
+            ),
+            400,
+        )
+    db.update_category(category_id, name)
+    return redirect(url_for("categories_list"))
+
+
+@app.route("/categories/<int:category_id>/delete", methods=["POST"])
+def category_delete(category_id):
+    db.delete_category(category_id)
+    return redirect(url_for("categories_list"))
+
+
+@app.route("/products")
+def products_list():
+    products = db.list_products()
+    categories = db.list_categories()
+    return render_template("products.html", products=products, categories=categories)
+
+
+@app.route("/products/add", methods=["GET", "POST"])
+def product_add():
+    categories = db.list_categories()
+    if not categories:
+        return redirect(url_for("categories_list"))
+    if request.method == "GET":
+        return render_template("product_edit.html", product=None, categories=categories)
+    name = (request.form.get("name") or "").strip()
+    try:
+        category_id = int(request.form.get("category_id") or 0)
+    except ValueError:
+        category_id = 0
+    if not name:
+        return (
+            render_template(
+                "product_edit.html",
+                product=None,
+                categories=categories,
+                name=name,
+                category_id=category_id,
+                error="Name is required.",
+            ),
+            400,
+        )
+    if not category_id or not db.get_category(category_id):
+        return (
+            render_template(
+                "product_edit.html",
+                product=None,
+                categories=categories,
+                name=name,
+                category_id=category_id,
+                error="Please select a category.",
+            ),
+            400,
+        )
+    db.create_product(name, category_id)
+    return redirect(url_for("products_list"))
+
+
+@app.route("/products/<int:product_id>/edit", methods=["GET", "POST"])
+def product_edit(product_id):
+    product = db.get_product(product_id)
+    categories = db.list_categories()
+    if not product:
+        return "Product not found", 404
+    if request.method == "GET":
+        return render_template(
+            "product_edit.html",
+            product=product,
+            categories=categories,
+        )
+    name = (request.form.get("name") or "").strip()
+    try:
+        category_id = int(request.form.get("category_id") or 0)
+    except ValueError:
+        category_id = 0
+    if not name:
+        return (
+            render_template(
+                "product_edit.html",
+                product=product,
+                categories=categories,
+                name=name,
+                category_id=category_id,
+                error="Name is required.",
+            ),
+            400,
+        )
+    if not category_id or not db.get_category(category_id):
+        return (
+            render_template(
+                "product_edit.html",
+                product=product,
+                categories=categories,
+                name=name,
+                category_id=category_id,
+                error="Please select a category.",
+            ),
+            400,
+        )
+    db.update_product(product_id, name, category_id)
+    return redirect(url_for("products_list"))
+
+
+@app.route("/products/<int:product_id>/delete", methods=["POST"])
+def product_delete(product_id):
+    db.delete_product(product_id)
+    return redirect(url_for("products_list"))
+
+
+@app.route("/product-trends")
+def product_trends():
+    count = db.count_costs()
+    if count == 0:
+        return render_template("product_trends.html", empty=True, trends=[])
+    trends = db.product_trends()
+    return render_template("product_trends.html", empty=False, trends=trends)
+
+
+@app.route("/settings", methods=["GET", "POST"])
+def settings():
+    if request.method == "POST":
+        currency = request.form.get("currency", "").strip()
+        if currency in AVAILABLE_CURRENCIES:
+            db.set_setting("currency", currency)
+            return redirect(url_for("dashboard"))
+    current = g.currency or DEFAULT_CURRENCY
+    return render_template(
+        "settings.html",
+        currencies=AVAILABLE_CURRENCIES,
+        current_currency=current,
     )
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS expenses (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            date TEXT NOT NULL,
-            product TEXT NOT NULL,
-            category_id INTEGER NOT NULL,
-            quantity INTEGER NOT NULL,
-            unit_price REAL NOT NULL,
-            FOREIGN KEY (category_id) REFERENCES categories(id)
-        )
-        """
-    )
-    conn.commit()
-    conn.close()
-
-
-def get_selected_currency() -> str:
-    currency = session.get("currency") or "USD"
-    if currency not in ALLOWED_CURRENCIES:
-        currency = "USD"
-        session["currency"] = currency
-    return currency
-
-
-def convert_amount(amount: float, target_currency: str) -> float:
-    if amount is None:
-        return 0.0
-    rate = CURRENCY_RATES.get(target_currency, 1.0)
-    return round(amount * rate, 2)
-
-
-def format_money(amount: float, currency: str) -> str:
-    converted = convert_amount(amount or 0.0, currency)
-    return f"{converted:,.2f} {currency}"
 
 
 if __name__ == "__main__":
-    flask_app = create_app()
-    flask_app.run(debug=True, host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
-
+    app.run(debug=True, port=5000)
