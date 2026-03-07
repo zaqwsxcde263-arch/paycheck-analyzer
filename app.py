@@ -93,7 +93,8 @@ def _apply_currency(con, df: pd.DataFrame, display_currency: str) -> pd.DataFram
     return out
 
 
-def page_data_entry(con) -> None:
+def page_data_entry(con, base_currency: str) -> None:
+    base_currency = (base_currency or DEFAULT_CURRENCY).strip().upper()
     st.subheader("Manual data entry")
 
     with st.expander("Categories", expanded=True):
@@ -155,7 +156,7 @@ def page_data_entry(con) -> None:
             with pr2:
                 price = st.number_input("Price", min_value=0.0, value=0.0, step=0.01)
             with pr3:
-                currency = st.text_input("Currency", value=DEFAULT_CURRENCY, max_chars=5)
+                currency = st.text_input("Currency", value=base_currency, max_chars=5)
             with pr4:
                 eff = st.date_input("Effective date", value=date.today())
             note = st.text_input("Note (optional)", placeholder="e.g. store / brand / promo")
@@ -193,7 +194,7 @@ def page_data_entry(con) -> None:
         with pc3:
             unit_price = st.number_input("Unit price", min_value=0.0, value=0.0, step=0.01)
         with pc4:
-            currency = st.text_input("Currency", value=DEFAULT_CURRENCY, max_chars=5, key="purchase_currency")
+            currency = st.text_input("Currency", value=base_currency, max_chars=5, key="purchase_currency")
 
         dt1, dt2 = st.columns([1, 1])
         with dt1:
@@ -222,7 +223,7 @@ def page_data_entry(con) -> None:
         with fx1:
             as_of_ = st.date_input("As-of date", value=date.today(), key="fx_asof")
         with fx2:
-            from_cur = st.text_input("From", value="USD", max_chars=5, key="fx_from")
+            from_cur = st.text_input("From", value=base_currency, max_chars=5, key="fx_from")
         with fx3:
             to_cur = st.text_input("To", value="EUR", max_chars=5, key="fx_to")
         with fx4:
@@ -235,7 +236,8 @@ def page_data_entry(con) -> None:
                 st.error(str(e))
 
 
-def page_dashboards(con) -> None:
+def page_dashboards(con, base_currency: str) -> None:
+    base_currency = (base_currency or DEFAULT_CURRENCY).strip().upper()
     st.subheader("Dashboards")
     purchases = _as_df(db.list_purchases(con))
     prices = _as_df(db.list_prices(con))
@@ -244,7 +246,7 @@ def page_dashboards(con) -> None:
         st.info("Add some purchases to see dashboards.")
         return
 
-    display_currency = _pick_currency(_infer_known_currencies(purchases, prices), DEFAULT_CURRENCY)
+    display_currency = _pick_currency(_infer_known_currencies(purchases, prices), base_currency)
     p = _apply_currency(con, purchases, display_currency)
     p["purchased_at"] = pd.to_datetime(p["purchased_at"], errors="coerce")
     p["month"] = p["purchased_at"].dt.to_period("M").astype(str)
@@ -288,7 +290,8 @@ def page_dashboards(con) -> None:
         )
 
 
-def page_price_changes(con) -> None:
+def page_price_changes(con, base_currency: str) -> None:
+    base_currency = (base_currency or DEFAULT_CURRENCY).strip().upper()
     st.subheader("Product price changes")
     prices = _as_df(db.list_prices(con))
     if prices.empty:
@@ -298,7 +301,7 @@ def page_price_changes(con) -> None:
     prices["effective_date"] = pd.to_datetime(prices["effective_date"], errors="coerce")
     prices["currency"] = prices["currency"].astype(str).str.upper()
 
-    cur = _pick_currency(sorted(prices["currency"].dropna().unique().tolist()), DEFAULT_CURRENCY)
+    cur = _pick_currency(sorted(prices["currency"].dropna().unique().tolist()), base_currency)
     view = prices[prices["currency"] == cur].copy()
     if view.empty:
         st.info(f"No price history in {cur}.")
@@ -349,17 +352,24 @@ def main() -> None:
 
     con = _get_con()
 
-    page = st.sidebar.radio(
-        "Navigate",
-        options=["Data entry", "Dashboards", "Price changes"],
-    )
+    with st.sidebar:
+        st.header("Settings")
+        base_default = st.session_state.get("base_currency", DEFAULT_CURRENCY)  # type: ignore[attr-defined]
+        base_input = st.text_input("Base currency", value=base_default, max_chars=5, key="base_currency_input")
+        base_currency = (base_input or DEFAULT_CURRENCY).strip().upper()
+        st.session_state["base_currency"] = base_currency  # type: ignore[attr-defined]
+
+        page = st.radio(
+            "Navigate",
+            options=["Data entry", "Dashboards", "Price changes"],
+        )
 
     if page == "Data entry":
-        page_data_entry(con)
+        page_data_entry(con, base_currency)
     elif page == "Dashboards":
-        page_dashboards(con)
+        page_dashboards(con, base_currency)
     else:
-        page_price_changes(con)
+        page_price_changes(con, base_currency)
 
 
 if __name__ == "__main__":
