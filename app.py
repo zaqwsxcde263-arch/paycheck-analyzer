@@ -1,377 +1,289 @@
-from __future__ import annotations
+from datetime import datetime
+from decimal import Decimal
+from typing import Dict, List, Tuple
 
-import os
-from datetime import date, datetime, time
-
-import pandas as pd
-import plotly.express as px
-import streamlit as st
-
-from src import db
-from src.fx import convert, fetch_live_rate
+from flask import Flask, redirect, render_template, request, session, url_for
+from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import func
 
 
-APP_TITLE = "Paycheck Analyzer"
-DEFAULT_CURRENCY = "USD"
+SUPPORTED_CURRENCIES = ["USD", "RUB", "BYN", "EUR", "JPY"]
+BASE_CURRENCY = "USD"
+
+# Rates are expressed as: 1 USD = rate in target currency
+EXCHANGE_RATES: Dict[str, Decimal] = {
+    "USD": Decimal("1.0"),
+    "EUR": Decimal("0.92"),
+    "RUB": Decimal("90.0"),
+    "BYN": Decimal("3.2"),
+    "JPY": Decimal("150.0"),
+}
 
 
-def _db_path() -> str:
-    return os.path.join(os.path.dirname(__file__), "data", "paycheck.db")
+app = Flask(__name__)
+app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///paycheck.db"
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+app.secret_key = "change-me-in-production"
+
+db = SQLAlchemy(app)
 
 
-@st.cache_resource
-def _get_con() -> db.sqlite3.Connection:  # type: ignore[attr-defined]
-    con = db.connect(db.DBConfig(path=_db_path()))
-    db.init_db(con)
-    return con
+class Expense(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    date = db.Column(db.Date, nullable=False)
+    product = db.Column(db.String(255), nullable=False)
+    category = db.Column(db.String(255), nullable=False)
+    quantity = db.Column(db.Integer, nullable=False)
+    price = db.Column(db.Numeric(10, 2), nullable=False)  # price per item in base currency
+
+    @property
+    def total_base(self) -> Decimal:
+        return Decimal(self.quantity) * Decimal(self.price)
 
 
-def _as_df(rows: list[db.sqlite3.Row]) -> pd.DataFrame:  # type: ignore[attr-defined]
-    if not rows:
-        return pd.DataFrame()
-    return pd.DataFrame([dict(r) for r in rows])
+def get_current_currency() -> str:
+    currency = session.get("currency", BASE_CURRENCY)
+    if currency not in SUPPORTED_CURRENCIES:
+        currency = BASE_CURRENCY
+    return currency
 
 
-def _week_start(d: pd.Timestamp) -> pd.Timestamp:
-    return (d - pd.to_timedelta(d.dayofweek, unit="D")).normalize()
+def convert_from_base(amount: Decimal, target_currency: str) -> Decimal:
+    rate = EXCHANGE_RATES.get(target_currency, Decimal("1.0"))
+    return (amount * rate).quantize(Decimal("0.01"))
 
 
-def _pick_currency(codes: list[str], default: str) -> str:
-    codes_u = sorted({c.strip().upper() for c in codes if c and str(c).strip()})
-    if default not in codes_u:
-        codes_u = [default] + codes_u
-    return st.selectbox("Currency (display)", options=codes_u, index=codes_u.index(default))
+def currency_symbol(currency: str) -> str:
+    return {
+        "USD": "$",
+        "EUR": "€",
+        "RUB": "₽",
+        "BYN": "Br",
+        "JPY": "¥",
+    }.get(currency, currency)
 
 
-def _infer_known_currencies(purchases_df: pd.DataFrame, prices_df: pd.DataFrame) -> list[str]:
-    codes: list[str] = [DEFAULT_CURRENCY, "EUR", "GBP"]
-    for df in (purchases_df, prices_df):
-        if not df.empty and "currency" in df.columns:
-            codes.extend([str(x) for x in df["currency"].dropna().unique().tolist()])
-    return sorted({c.strip().upper() for c in codes if c})
+@app.context_processor
+def inject_globals():
+    current_currency = get_current_currency()
+    return {
+        "supported_currencies": SUPPORTED_CURRENCIES,
+        "current_currency": current_currency,
+        "currency_symbol": currency_symbol(current_currency),
+    }
 
 
-def _get_rate(con, as_of_: date, from_cur: str, to_cur: str) -> tuple[float, str]:
-    from_cur = from_cur.strip().upper()
-    to_cur = to_cur.strip().upper()
-    if from_cur == to_cur:
-        return 1.0, "identity"
-
-    manual = db.get_fx_rate(con, as_of_, from_cur, to_cur)
-    if manual is not None:
-        return float(manual), "manual(db)"
-
-    live = fetch_live_rate(from_cur, to_cur)
-    if live is not None:
-        return float(live.rate), live.source
-
-    return 1.0, "fallback:1.0"
+@app.route("/")
+def index():
+    return redirect(url_for("add_expense"))
 
 
-def _apply_currency(con, df: pd.DataFrame, display_currency: str) -> pd.DataFrame:
-    if df.empty:
-        return df
-    out = df.copy()
-    out["purchased_at"] = pd.to_datetime(out["purchased_at"], errors="coerce")
-    out["purchased_date"] = out["purchased_at"].dt.date
-    out["currency"] = out["currency"].astype(str).str.upper()
-    display_currency = display_currency.strip().upper()
-
-    rates = []
-    sources = []
-    for _, row in out.iterrows():
-        as_of_ = row["purchased_date"]
-        fc = row["currency"]
-        r, src = _get_rate(con, as_of_, fc, display_currency)
-        rates.append(r)
-        sources.append(src)
-    out["fx_rate"] = rates
-    out["fx_source"] = sources
-    out["total_display"] = out["total"] * out["fx_rate"]
-    out["unit_price_display"] = out["unit_price"] * out["fx_rate"]
-    out["display_currency"] = display_currency
-    return out
+@app.route("/set-currency", methods=["POST"])
+def set_currency():
+    currency = request.form.get("currency", BASE_CURRENCY)
+    if currency in SUPPORTED_CURRENCIES:
+        session["currency"] = currency
+    return redirect(request.referrer or url_for("index"))
 
 
-def page_data_entry(con, base_currency: str) -> None:
-    base_currency = (base_currency or DEFAULT_CURRENCY).strip().upper()
-    st.subheader("Manual data entry")
+@app.route("/add", methods=["GET", "POST"])
+def add_expense():
+    errors: Dict[str, str] = {}
+    form_data = {
+        "date": "",
+        "product": "",
+        "category": "",
+        "quantity": "",
+        "price": "",
+    }
 
-    with st.expander("Categories", expanded=True):
-        c1, c2 = st.columns([2, 1])
-        with c1:
-            cat_name = st.text_input("New category name", placeholder="e.g. Groceries")
-        with c2:
-            if st.button("Add category", use_container_width=True):
-                try:
-                    db.upsert_category(con, cat_name)
-                    st.success("Saved.")
-                except Exception as e:
-                    st.error(str(e))
+    if request.method == "POST":
+        form_data["date"] = request.form.get("date", "").strip()
+        form_data["product"] = request.form.get("product", "").strip()
+        form_data["category"] = request.form.get("category", "").strip()
+        form_data["quantity"] = request.form.get("quantity", "").strip()
+        form_data["price"] = request.form.get("price", "").strip()
 
-        cats = _as_df(db.list_categories(con))
-        if not cats.empty:
-            st.dataframe(cats, hide_index=True, use_container_width=True)
+        # Validation
+        # Date
+        if not form_data["date"]:
+            errors["date"] = "Date is required."
         else:
-            st.info("No categories yet.")
-
-    with st.expander("Products", expanded=True):
-        cats = _as_df(db.list_categories(con))
-        cat_options = [("(none)", None)]
-        if not cats.empty:
-            cat_options += [(row["name"], int(row["id"])) for _, row in cats.iterrows()]
-
-        p1, p2, p3 = st.columns([2, 2, 1])
-        with p1:
-            prod_name = st.text_input("Product name", placeholder="e.g. Milk 1L")
-        with p2:
-            cat_label = st.selectbox("Category", options=[x[0] for x in cat_options])
-            cat_id = dict(cat_options).get(cat_label)
-        with p3:
-            unit = st.text_input("Unit (optional)", placeholder="e.g. L, kg")
-
-        if st.button("Add / update product", use_container_width=True):
             try:
-                db.upsert_product(con, prod_name, cat_id, unit)
-                st.success("Saved.")
-            except Exception as e:
-                st.error(str(e))
+                parsed_date = datetime.strptime(form_data["date"], "%Y-%m-%d").date()
+            except ValueError:
+                errors["date"] = "Date must be in YYYY-MM-DD format."
 
-        prods = _as_df(db.list_products(con))
-        if not prods.empty:
-            st.dataframe(prods[["id", "name", "category_name", "unit"]], hide_index=True, use_container_width=True)
+        # Product
+        if not form_data["product"]:
+            errors["product"] = "Product name is required."
+
+        # Category
+        if not form_data["category"]:
+            errors["category"] = "Category is required."
+
+        # Quantity
+        quantity_val = None
+        if not form_data["quantity"]:
+            errors["quantity"] = "Quantity is required."
         else:
-            st.info("No products yet.")
+            try:
+                quantity_val = int(form_data["quantity"])
+                if quantity_val <= 0:
+                    errors["quantity"] = "Quantity must be a positive integer."
+            except ValueError:
+                errors["quantity"] = "Quantity must be an integer."
 
-    with st.expander("Product prices (history)", expanded=False):
-        prods = _as_df(db.list_products(con))
-        if prods.empty:
-            st.warning("Add at least one product first.")
+        # Price
+        price_val = None
+        if not form_data["price"]:
+            errors["price"] = "Price is required."
         else:
-            name_to_id = {r["name"]: int(r["id"]) for _, r in prods.iterrows()}
-            pr1, pr2, pr3, pr4 = st.columns([2, 1, 1, 2])
-            with pr1:
-                prod_sel = st.selectbox("Product", options=sorted(name_to_id.keys()))
-                product_id = name_to_id[prod_sel]
-            with pr2:
-                price = st.number_input("Price", min_value=0.0, value=0.0, step=0.01)
-            with pr3:
-                currency = st.text_input("Currency", value=base_currency, max_chars=5)
-            with pr4:
-                eff = st.date_input("Effective date", value=date.today())
-            note = st.text_input("Note (optional)", placeholder="e.g. store / brand / promo")
-
-            if st.button("Record price", use_container_width=True):
-                try:
-                    db.record_price(con, product_id, price, currency, eff, note=note)
-                    st.success("Recorded.")
-                except Exception as e:
-                    st.error(str(e))
-
-            prices = _as_df(db.list_prices(con, product_id=product_id))
-            if not prices.empty:
-                st.dataframe(
-                    prices[["effective_date", "currency", "price", "note"]],
-                    hide_index=True,
-                    use_container_width=True,
-                )
-
-    with st.expander("Purchases (spend entries)", expanded=True):
-        prods = _as_df(db.list_products(con))
-        if prods.empty:
-            st.warning("Add at least one product first.")
-            return
-
-        name_to_row = {r["name"]: r for _, r in prods.iterrows()}
-        pc1, pc2, pc3, pc4 = st.columns([2, 1, 1, 1])
-        with pc1:
-            prod_name = st.selectbox("Product", options=sorted(name_to_row.keys()))
-            prod_row = name_to_row[prod_name]
-            product_id = int(prod_row["id"])
-            category_id = int(prod_row["category_id"]) if pd.notna(prod_row["category_id"]) else None
-        with pc2:
-            qty = st.number_input("Quantity", min_value=0.0, value=1.0, step=0.5)
-        with pc3:
-            unit_price = st.number_input("Unit price", min_value=0.0, value=0.0, step=0.01)
-        with pc4:
-            currency = st.text_input("Currency", value=base_currency, max_chars=5, key="purchase_currency")
-
-        dt1, dt2 = st.columns([1, 1])
-        with dt1:
-            d = st.date_input("Date", value=date.today(), key="purchase_date")
-        with dt2:
-            t = st.time_input("Time", value=datetime.now().time().replace(second=0, microsecond=0), key="purchase_time")
-        purchased_at = datetime.combine(d, t if isinstance(t, time) else datetime.now().time())
-        note = st.text_input("Note (optional)", placeholder="e.g. store / receipt")
-
-        st.caption(f"Total: {qty * unit_price:.2f} {currency.strip().upper()}")
-        if st.button("Add purchase", use_container_width=True):
             try:
-                db.add_purchase(con, purchased_at, product_id, category_id, qty, unit_price, currency, note=note)
-                st.success("Added.")
-            except Exception as e:
-                st.error(str(e))
+                price_val = Decimal(form_data["price"])
+                if price_val <= 0:
+                    errors["price"] = "Price must be a positive number."
+            except Exception:
+                errors["price"] = "Price must be a valid number."
 
-        purchases = _as_df(db.list_purchases(con))
-        if not purchases.empty:
-            show = purchases[["purchased_at", "product_name", "category_name", "quantity", "unit_price", "currency", "total", "note"]]
-            st.dataframe(show, hide_index=True, use_container_width=True)
+        if not errors:
+            expense = Expense(
+                date=parsed_date,
+                product=form_data["product"],
+                category=form_data["category"],
+                quantity=quantity_val,
+                price=price_val,
+            )
+            db.session.add(expense)
+            db.session.commit()
+            return redirect(url_for("add_expense"))
 
-    with st.expander("FX rates (manual override)", expanded=False):
-        st.write("If you add a manual FX rate for a date, it will be used before live FX.")
-        fx1, fx2, fx3, fx4 = st.columns([1, 1, 1, 1])
-        with fx1:
-            as_of_ = st.date_input("As-of date", value=date.today(), key="fx_asof")
-        with fx2:
-            from_cur = st.text_input("From", value=base_currency, max_chars=5, key="fx_from")
-        with fx3:
-            to_cur = st.text_input("To", value="EUR", max_chars=5, key="fx_to")
-        with fx4:
-            rate = st.number_input("Rate", min_value=0.0, value=1.0, step=0.0001, key="fx_rate")
-        if st.button("Save FX rate", use_container_width=True):
-            try:
-                db.upsert_fx_rate(con, as_of_, from_cur, to_cur, rate, source="manual")
-                st.success("Saved.")
-            except Exception as e:
-                st.error(str(e))
+    return render_template("add_expense.html", errors=errors, form_data=form_data)
 
 
-def page_dashboards(con, base_currency: str) -> None:
-    base_currency = (base_currency or DEFAULT_CURRENCY).strip().upper()
-    st.subheader("Dashboards")
-    purchases = _as_df(db.list_purchases(con))
-    prices = _as_df(db.list_prices(con))
-
-    if purchases.empty:
-        st.info("Add some purchases to see dashboards.")
-        return
-
-    display_currency = _pick_currency(_infer_known_currencies(purchases, prices), base_currency)
-    p = _apply_currency(con, purchases, display_currency)
-    p["purchased_at"] = pd.to_datetime(p["purchased_at"], errors="coerce")
-    p["month"] = p["purchased_at"].dt.to_period("M").astype(str)
-    p["week_start"] = p["purchased_at"].apply(lambda x: _week_start(pd.Timestamp(x)) if pd.notna(x) else pd.NaT)
-    p["week_start"] = pd.to_datetime(p["week_start"], errors="coerce")
-    p["week"] = p["week_start"].dt.date.astype(str)
-    p["category_name"] = p["category_name"].fillna("(uncategorized)")
-
-    m1, m2, m3 = st.columns(3)
-    with m1:
-        st.metric("Total spend", f"{p['total_display'].sum():.2f} {display_currency}")
-    with m2:
-        st.metric("Avg per purchase", f"{p['total_display'].mean():.2f} {display_currency}")
-    with m3:
-        st.metric("Purchases", f"{len(p):,}")
-
-    st.divider()
-    c1, c2 = st.columns(2)
-    with c1:
-        by_month = p.groupby("month", as_index=False)["total_display"].sum().sort_values("month")
-        fig = px.bar(by_month, x="month", y="total_display", title="Spend by month")
-        fig.update_yaxes(title=f"Total ({display_currency})")
-        st.plotly_chart(fig, use_container_width=True)
-    with c2:
-        by_week = p.groupby("week", as_index=False)["total_display"].sum().sort_values("week")
-        fig = px.line(by_week, x="week", y="total_display", markers=True, title="Spend by week")
-        fig.update_yaxes(title=f"Total ({display_currency})")
-        st.plotly_chart(fig, use_container_width=True)
-
-    by_cat = p.groupby("category_name", as_index=False)["total_display"].sum().sort_values("total_display", ascending=False)
-    fig = px.bar(by_cat, x="category_name", y="total_display", title="Spend by category")
-    fig.update_xaxes(title="Category")
-    fig.update_yaxes(title=f"Total ({display_currency})")
-    st.plotly_chart(fig, use_container_width=True)
-
-    with st.expander("FX details (per row)", expanded=False):
-        st.dataframe(
-            p[["purchased_at", "product_name", "currency", "total", "fx_rate", "fx_source", "total_display"]],
-            hide_index=True,
-            use_container_width=True,
+def _aggregate_summary() -> Tuple[List[Tuple[str, Decimal]], List[Tuple[str, Decimal]], List[Tuple[str, Decimal]]]:
+    # By month (YYYY-MM)
+    monthly = (
+        db.session.query(
+            func.strftime("%Y-%m", Expense.date).label("month"),
+            func.sum(Expense.price * Expense.quantity).label("total"),
         )
-
-
-def page_price_changes(con, base_currency: str) -> None:
-    base_currency = (base_currency or DEFAULT_CURRENCY).strip().upper()
-    st.subheader("Product price changes")
-    prices = _as_df(db.list_prices(con))
-    if prices.empty:
-        st.info("Record product prices to see changes over time.")
-        return
-
-    prices["effective_date"] = pd.to_datetime(prices["effective_date"], errors="coerce")
-    prices["currency"] = prices["currency"].astype(str).str.upper()
-
-    cur = _pick_currency(sorted(prices["currency"].dropna().unique().tolist()), base_currency)
-    view = prices[prices["currency"] == cur].copy()
-    if view.empty:
-        st.info(f"No price history in {cur}.")
-        return
-
-    prods = sorted(view["product_name"].dropna().unique().tolist())
-    selected = st.multiselect("Products", options=prods, default=prods[: min(5, len(prods))])
-    if selected:
-        view = view[view["product_name"].isin(selected)]
-
-    fig = px.line(
-        view.sort_values(["product_name", "effective_date"]),
-        x="effective_date",
-        y="price",
-        color="product_name",
-        markers=True,
-        title=f"Price history ({cur})",
+        .group_by("month")
+        .order_by("month")
+        .all()
     )
-    st.plotly_chart(fig, use_container_width=True)
 
-    latest = (
-        view.sort_values(["product_name", "effective_date"])
-        .groupby("product_name", as_index=False)
-        .tail(1)
-        .sort_values("price", ascending=False)
+    # By category
+    categories = (
+        db.session.query(
+            Expense.category.label("category"),
+            func.sum(Expense.price * Expense.quantity).label("total"),
+        )
+        .group_by(Expense.category)
+        .order_by(Expense.category)
+        .all()
     )
-    st.divider()
-    st.write("Latest recorded price per product")
-    st.dataframe(latest[["product_name", "effective_date", "price", "note"]], hide_index=True, use_container_width=True)
 
-    changes = view.sort_values(["product_name", "effective_date"]).copy()
-    changes["prev_price"] = changes.groupby("product_name")["price"].shift(1)
-    changes["delta"] = changes["price"] - changes["prev_price"]
-    changes["delta_pct"] = (changes["delta"] / changes["prev_price"]) * 100.0
-    changes = changes.dropna(subset=["prev_price"])
-    if not changes.empty:
-        st.write("Price changes (event-to-event)")
-        st.dataframe(
-            changes[["product_name", "effective_date", "prev_price", "price", "delta", "delta_pct", "note"]],
-            hide_index=True,
-            use_container_width=True,
+    # By week (ISO week number: YYYY-WW)
+    weekly = (
+        db.session.query(
+            func.strftime("%Y", Expense.date).label("year"),
+            func.strftime("%W", Expense.date).label("week"),
+            func.sum(Expense.price * Expense.quantity).label("total"),
         )
+        .group_by("year", "week")
+        .order_by("year", "week")
+        .all()
+    )
+
+    return monthly, categories, weekly
 
 
-def main() -> None:
-    st.set_page_config(page_title=APP_TITLE, layout="wide")
-    st.title(APP_TITLE)
+@app.route("/dashboard/summary")
+def dashboard_summary():
+    current_currency = get_current_currency()
+    monthly, categories, weekly = _aggregate_summary()
 
-    con = _get_con()
+    def convert_rows(rows, label_key):
+        converted = []
+        for row in rows:
+            label = getattr(row, label_key)
+            total_base = Decimal(row.total)
+            total_converted = convert_from_base(total_base, current_currency)
+            converted.append((label, total_converted))
+        return converted
 
-    with st.sidebar:
-        st.header("Settings")
-        base_default = st.session_state.get("base_currency", DEFAULT_CURRENCY)  # type: ignore[attr-defined]
-        base_input = st.text_input("Base currency", value=base_default, max_chars=5, key="base_currency_input")
-        base_currency = (base_input or DEFAULT_CURRENCY).strip().upper()
-        st.session_state["base_currency"] = base_currency  # type: ignore[attr-defined]
+    monthly_data = convert_rows(monthly, "month")
 
-        page = st.radio(
-            "Navigate",
-            options=["Data entry", "Dashboards", "Price changes"],
+    category_data = convert_rows(categories, "category")
+
+    weekly_data = []
+    for row in weekly:
+        label = f"{row.year}-W{row.week}"
+        total_base = Decimal(row.total)
+        total_converted = convert_from_base(total_base, current_currency)
+        weekly_data.append((label, total_converted))
+
+    return render_template(
+        "dashboard_summary.html",
+        monthly_data=monthly_data,
+        category_data=category_data,
+        weekly_data=weekly_data,
+    )
+
+
+@app.route("/dashboard/product-trends")
+def dashboard_product_trends():
+    current_currency = get_current_currency()
+    products = (
+        db.session.query(Expense.product)
+        .distinct()
+        .order_by(Expense.product)
+        .all()
+    )
+    product_names = [p.product for p in products]
+
+    selected_product = request.args.get("product") or (product_names[0] if product_names else None)
+
+    trend_rows: List[Dict] = []
+    if selected_product:
+        expenses = (
+            Expense.query.filter_by(product=selected_product)
+            .order_by(Expense.date.asc())
+            .all()
         )
+        previous_price = None
+        for e in expenses:
+            unit_price_converted = convert_from_base(Decimal(e.price), current_currency)
+            total_converted = convert_from_base(e.total_base, current_currency)
+            price_change = None
+            if previous_price is not None:
+                price_change = unit_price_converted - previous_price
+            trend_rows.append(
+                {
+                    "date": e.date,
+                    "quantity": e.quantity,
+                    "unit_price": unit_price_converted,
+                    "total": total_converted,
+                    "price_change": price_change,
+                }
+            )
+            previous_price = unit_price_converted
 
-    if page == "Data entry":
-        page_data_entry(con, base_currency)
-    elif page == "Dashboards":
-        page_dashboards(con, base_currency)
-    else:
-        page_price_changes(con, base_currency)
+    return render_template(
+        "dashboard_product_trends.html",
+        products=product_names,
+        selected_product=selected_product,
+        trend_rows=trend_rows,
+    )
+
+
+def init_db():
+    with app.app_context():
+        db.create_all()
 
 
 if __name__ == "__main__":
-    main()
+    init_db()
+    app.run(debug=True)
 
