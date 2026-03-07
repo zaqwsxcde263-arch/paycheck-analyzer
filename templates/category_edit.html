@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="form-page">
+  <h1>Edit category</h1>
+
+  {% if errors and errors|length %}
+  <div class="error-list">
+    <ul>
+      {% for err in errors %}
+      <li>{{ err }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  <div class="card form-card">
+    <form method="post">
+      <div class="form-row">
+        <label for="name">Name</label>
+        <input
+          type="text"
+          id="name"
+          name="name"
+          value="{{ category.name }}"
+          required
+        />
+      </div>
+      <div class="form-row">
+        <label for="description">Description (optional)</label>
+        <textarea id="description" name="description" rows="2">
+{{ category.description or "" }}</textarea
+        >
+      </div>
+      <div class="form-actions">
+        <a href="{{ url_for('manage_categories') }}" class="secondary button-link">
+          Cancel
+        </a>
+        <button type="submit" class="primary">Save changes</button>
+      </div>
+    </form>
+  </div>
+</section>
+{% endblock %}
+

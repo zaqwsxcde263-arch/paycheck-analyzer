@@ -1,67 +1,102 @@
 ## Paycheck Analyzer
 
-Simple web application for manually tracking paycheck items and analyzing costs over time.
+A small web application to manually track paycheck items and analyze spending by month, by category, and by week. It also shows product price changes over time and supports a global currency selector.
+
+### Tech stack
+
+- **Language**: Python
+- **Framework**: Flask
+- **Database**: SQLite (file `paycheck.db` in the project root)
 
 ### Features
 
-- **Manual data entry**: Add paycheck items one by one with required fields: date, product, category, items quantity, and price per item.
-- **Dashboards**:
-  - **By month**: Total spending aggregated per month.
-  - **By category**: Total spending per category.
-  - **By week**: Total spending per week.
-  - **Product cost trends**: Price history and change per product over time.
-- **Global currency selector**: View all costs in one of the supported currencies: USD, RUB, BYN, EUR, JPY.
-- **Validation**: Server-side validation for all required fields and value ranges.
+- **Manual data entry**
+  - Enter a paycheck date once and add many items (rows) in a single form.
+  - Each item has: date (shared for the form), product name, category, quantity, and price-per-item.
+  - Server-side validation for every item:
+    - Product name required.
+    - Category required.
+    - Quantity must be a positive integer.
+    - Price must be a positive number.
 
-All monetary values are stored internally in a base currency and converted on the fly for display.
+- **Categories**
+  - Separate pages to create, edit, and delete categories.
+  - Each item in the paycheck form has a category selector populated from the categories you define.
 
-### Requirements
+- **Dashboards**
+  - Overview dashboard:
+    - Total spent (in the currently selected currency).
+    - Last transaction date.
+    - Chart: total by month.
+    - Chart: total by week.
+    - Chart: total by category (overall).
+  - Product trends:
+    - Select a product and see how its per-item price has changed over time.
 
-- Python 3.10+ recommended
-- SQLite (bundled with Python via the `sqlite3` module)
+- **Currency selector**
+  - Global currency selector in the top navigation.
+  - Available currencies: **USD, RUB, BYN, EUR, JPY**.
+  - All values are stored internally in a base currency (treated as USD) and converted for display.
 
 ### Installation
 
-1. **Create and activate a virtual environment (recommended)**:
+1. **Create and activate a virtual environment** (recommended):
 
-```bash
-cd /home/shubinds/Projects
-python -m venv venv
-source venv/bin/activate
-```
+   ```bash
+   cd paycheck-analyzer
+   python -m venv .venv
+   source .venv/bin/activate  # on Windows: .venv\Scripts\activate
+   ```
 
 2. **Install dependencies**:
 
-```bash
-pip install -r requirements.txt
-```
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-### Running the application
+3. **Run the app**:
 
-From the project directory:
+   ```bash
+   python app.py
+   ```
 
-```bash
-python app.py
-```
+4. Open the app in a browser:
 
-Then open your browser and visit:
+   - `http://localhost:5000`
 
-```text
-http://127.0.0.1:5000/
-```
+### Usage workflow
 
-### Usage notes
+1. **Define categories**
+   - Go to `Categories` in the top navigation.
+   - Create categories such as `Groceries`, `Rent`, `Transport`, etc.
 
-- **Currency**: Use the currency selector in the top-right of the navigation bar to set the global display currency. All entered prices are assumed to be in that currency; dashboards convert totals based on simple built-in exchange rates.
-- **Required fields**: Date, product name, category, items quantity, and price per item must be provided for each paycheck item.
-- **Validation**:
-  - Date must be a valid calendar date.
-  - Quantity must be a positive integer.
-  - Price must be a positive number.
+2. **Add paycheck items**
+   - Go to `Add expenses`.
+   - Set the paycheck date.
+   - Fill in as many product rows as you need in a single form:
+     - Product (name)
+     - Category (select from the categories you created)
+     - Quantity (items quantity)
+     - Price (per item)
+   - Use **“Add another item”** to insert more rows.
+   - Submit the form; invalid rows will be reported with detailed messages.
 
-You can extend this project by:
+3. **View dashboards**
+   - Go to `Dashboard` to see:
+     - Month-by-month totals.
+     - Week-by-week totals.
+     - Overall totals by category.
 
-- Importing data from CSV files.
-- Replacing the static exchange rates with live rates from an API.
-- Adding authentication and multi-user support.
+4. **Track product cost changes**
+   - Go to `Product cost changes`.
+   - Select a product name and view a line chart of its price-per-item over time.
+
+5. **Change currency**
+   - Use the currency selector in the top navigation.
+   - This selection is global for the session; you do not need to set currency per item.
+
+### Notes
+
+- Default secret key and currency rates are suitable for local development only. For production use, set the `SECRET_KEY` environment variable and adjust `CURRENCY_RATES` in `app.py` as needed.
+- The SQLite database (`paycheck.db`) is created automatically on first run.
 

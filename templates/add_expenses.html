@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="form-page">
+  <h1>New paycheck items</h1>
+
+  <p class="hint">
+    Enter the paycheck date once, then add as many product lines as you need.
+  </p>
+
+  {% if errors and errors|length %}
+  <div class="error-list">
+    <ul>
+      {% for err in errors %}
+      <li>{{ err }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  <form method="post" class="card form-card">
+    <div class="form-row">
+      <label for="date">Paycheck date</label>
+      <input
+        type="date"
+        id="date"
+        name="date"
+        value="{{ date_value }}"
+        required
+      />
+    </div>
+
+    <table class="items-table" id="itemsTable">
+      <thead>
+        <tr>
+          <th>Product</th>
+          <th>Category</th>
+          <th>Quantity</th>
+          <th>Price (per item)</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in items %}
+        <tr class="item-row">
+          <td>
+            <input
+              type="text"
+              name="product[]"
+              value="{{ item.product }}"
+              placeholder="e.g. Milk"
+            />
+          </td>
+          <td>
+            <select name="category_id[]">
+              <option value="">Select category</option>
+              {% for cat in categories %}
+              <option
+                value="{{ cat.id }}"
+                {% if item.category_id|string == cat.id|string %}selected{% endif %}
+              >
+                {{ cat.name }}
+              </option>
+              {% endfor %}
+            </select>
+          </td>
+          <td>
+            <input
+              type="number"
+              name="quantity[]"
+              min="1"
+              step="1"
+              value="{{ item.quantity }}"
+            />
+          </td>
+          <td>
+            <input
+              type="number"
+              name="price[]"
+              min="0.01"
+              step="0.01"
+              value="{{ item.price }}"
+            />
+          </td>
+          <td>
+            <button
+              type="button"
+              class="icon-button remove-row-button"
+              onclick="removeItemRow(this)"
+            >
+              ✕
+            </button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <div class="form-actions">
+      <button
+        type="button"
+        class="secondary"
+        onclick="addItemRow('itemsTable')"
+      >
+        + Add another item
+      </button>
+      <button type="submit" class="primary">Save paycheck</button>
+    </div>
+  </form>
+</section>
+{% endblock %}
+
