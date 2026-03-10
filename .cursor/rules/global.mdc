@@ -1,0 +1,24 @@
+---
+description: Apply TypeScript best practices for PaycheckAnalyzer
+globs: ["**/*.ts", "**/*.tsx"]
+alwaysApply: true
+---
+# TypeScript Best Practices for PaycheckAnalyzer
+Use these guidelines when writing or modifying TypeScript code in the FUBAR-agile feature:
+1. Prefer explicit typing over any/unknown
+2. Use type guards to narrow types safely
+3. Avoid type assertions (as) where possible
+4. Properly type React props and state
+5. Use interfaces for objects that will be extended
+6. Use type for unions, intersections, and mapped types
+7. Explicitly type function parameters and return types
+8. Use ReactNode for component children
+9. Follow naming conventions:
+   - PascalCase for components, interfaces, and types
+   - camelCase for variables, functions, and methods
+   - UPPER_CASE for constants
+10. Prefer optional chaining and nullish coalescing over manual null checks
+11. Use ReadOnly or Readonly<T> for immutable data
+12. Prefer destructuring for props and state
+13. Use enums for discrete values that won't change
+14. Document complex types with JSDoc comments

@@ -1,0 +1,28 @@
+# Dependency directories
+node_modules
+# Complied Output
+build
+*.log
+eslint.xml
+# Secrets
+secrets/**
+# All config files - but we want to keep the folder
+config/**
+!.gitkeep
+# Environment
+**/*.env
+!example.env
+# Large test files
+tests/*/*.large.json
+# IDE - VS Code
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+# OS Specific garbage
+.DS_Store
+# Reports
+reports
+# Prompt source
+.prompts
