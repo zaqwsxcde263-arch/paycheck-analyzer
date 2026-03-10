@@ -1,0 +1,17 @@
+HTTP/2 200 
+date: Tue, 10 Mar 2026 19:30:30 GMT
+content-type: application/zip
+content-length: 15349
+server: cloudflare
+content-disposition: attachment; filename="paycheck-analyzer-api.zip"
+strict-transport-security: max-age=15552000; includeSubDomains
+last-modified: Tue, 10 Mar 2026 19:30:30 GMT
+cf-cache-status: MISS
+expires: Tue, 10 Mar 2026 20:30:30 GMT
+cache-control: public, max-age=3600
+accept-ranges: bytes
+vary: accept-encoding
+set-cookie: __cf_bm=mjjmZlfrll5y78siFulNPdf0e2D80VJMplDzV7MRbBY-1773171030.0958836-1.0.1.1-5OBb0zlVm3P0S8bsdsWCuZ9dcqPqhpgabfYokyW4EFbOtBckshCLN5i.RRFUimngelpN1nwzg6FHCkLUDAmSm13jdYD7L7VqJEH90.GooCZBzieibJiv4gqjWEMEwYBc; HttpOnly; Secure; Path=/; Domain=spring.io; Expires=Tue, 10 Mar 2026 20:00:30 GMT
+cf-ray: 9da4bbfa1f10270e-AMS
+alt-svc: h3=":443"; ma=86400
+

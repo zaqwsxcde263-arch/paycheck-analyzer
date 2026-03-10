@@ -1,0 +1,117 @@
+--- Analyze problem
+You are system analyst. You have next task: design an application that will help users to analyze their spendings.
+
+Required domain features:
+1) add spending:
+    - what user have bought
+    - how much did user spend on it
+    - who is the seller of this product
+    - when this product was bought (date)
+2) see dashboard with analyze of every month of spendings including current:
+    - a pie chart displaying the share of each category in total spending for a selected period;
+    - a bar chart of daily spending with an average receipt line to identify days with outliers;
+    - a cumulative bar chart illustrating the monthly change in spending by category;
+    - a horizontal ranking (top 10) of the largest individual purchases for the period;
+    - a chart with dynamics of commodity prices
+
+Required UI features:
+1) user input validation - all data should be validated;
+2) no exception propagation to the UI;
+
+--- AI improved prompt
+1. Objective
+Design an application that helps individual users track and analyze their daily spending to gain insights into their financial habits. The app should enable users to manually record purchases and view interactive dashboards that highlight spending patterns, outliers, and trends.
+
+2. Target Users
+Tech-savvy individuals who want to manage personal finances.
+Users expect a simple, intuitive interface with no financial expertise required.
+
+3. Scope
+In scope:
+- Manual entry of spending transactions.
+- Dashboard with five visualizations as listed below.
+- Data validation and user-friendly error handling.
+- Local storage.
+
+Out of scope:
+- Bank/card integration.
+- Budgeting or goal setting.
+- Receipt scanning via OCR.
+- Multi-currency support.
+- Export to PDF/Excel (may be added later).
+
+4. Functional Requirements
+4.1. Spending Entry
+- Users can add a new spending record with the following fields:
+    - Product/Service name (text, required)
+    - Amount (numeric, positive, required, with currency symbol – assume single currency e.g., USD)
+    - Seller/Merchant (text, required)
+    - Date (date picker, default today, cannot be future)
+    - Category (dropdown with predefined list: Groceries, Dining, Transport, Entertainment, Utilities, Shopping, Health, Other)
+    - Notes (optional text)
+
+- Users can edit or delete any existing record.
+- Users can view a list of their recent spendings with sorting and filtering by date, category, or amount.
+
+4.2. Dashboard
+The dashboard displays analysis for a selected month (including current month). It should include:
+1) Pie Chart – Spending by Category
+    - Shows percentage and amount of total spending for each category.
+    - Clicking a slice filters other charts to that category.
+2) Bar Chart – Daily Spending & Average
+    - Daily total spending as bars.
+    - A horizontal line representing the average daily spending for the month.
+    - Highlight bars that exceed 1.5× the average (outliers).
+3) Cumulative Bar Chart – Monthly Spending Change by Category
+    - Stacked bars for each week (or day) showing cumulative spending per category.
+    - Helps visualize how spending builds up over the month.
+4) Top 10 Purchases – Ranking
+    - List of the 10 largest individual purchases in the selected month.
+    - Columns: Product, Amount, Category, Date.
+    - Clicking an item shows details or allows edit.
+5) Price Dynamics Chart – Product Price Trends
+    - Line chart showing price changes over time for a selected product (or category average).
+    - User can select a product from a dropdown (based on purchase history) to see its price history.
+
+Global Dashboard Controls:
+- Month/year selector (default: current month).
+- Option to compare with previous month (maybe later).
+- Refresh data after adding/editing entries.
+
+5. Non-Functional Requirements
+- Performance: Dashboard charts should load within 2 seconds for up to 500 transactions per month.
+- Usability: Interface must be responsive and work on desktop and mobile browsers.
+- Reliability: No data loss; all changes should be saved immediately (or with confirmation).
+- Security: If user accounts are implemented, passwords must be hashed, and data encrypted in transit (HTTPS). No financial data stored in plain text.
+- Maintainability: Code should be modular and well-documented to allow future feature additions.
+
+6. UI/UX Guidelines
+- Use a clean, minimalist design with a neutral color palette. Categories should have distinct, consistent colors.
+- Forms should provide inline validation (e.g., red outline for invalid fields) and clear error messages.
+- Charts should be interactive: tooltips, clickable elements where appropriate.
+- Avoid technical jargon; use plain language (e.g., “Add purchase” instead of “Create transaction”).
+- Ensure all UI actions are reversible (edit/delete with confirmation).
+
+7. Data Requirements
+Entities:
+- User: id, name, email, password_hash, created_at
+- Category: id, name, color (hex), user_id (if user-defined) or global
+- Spending: id, user_id, product_name, amount, seller, date, category_id, notes, created_at/updated_at
+
+Calculations:
+- Daily totals: sum(amount) per day.
+- Category totals: sum(amount) per category for selected period.
+- Average daily spending: total_month_spending / days_in_month.
+- Cumulative sums: running total per category over time.
+
+8. Constraints & Assumptions
+- Technology stack: Preference for a web-based solution using React for frontend and a REST API (Java, spring boot) with a SQL database (PostgreSQL). Final choice up to architect.
+- Assumption: No third-party integrations in first version; all data manually entered.
+
+10. Deliverables
+The system analyst should provide:
+- System architecture diagram (components, data flow).
+- Database schema (ER diagram).
+- API specifications (endpoints, request/response formats).
+- User stories for each feature.
+
