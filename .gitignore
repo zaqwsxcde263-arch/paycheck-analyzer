@@ -216,3 +216,6 @@ __marimo__/
 .streamlit/secrets.toml~
 data
 paycheck.db
+.idea
+node_modules
+package-lock.json
